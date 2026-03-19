@@ -51,6 +51,9 @@ export function CopilotChat() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [history, setHistory] = useState<ConversationTurn[]>([]);
+  const [copyState, setCopyState] = useState<"idle" | "success" | "error">(
+    "idle",
+  );
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,6 +65,7 @@ export function CopilotChat() {
     setError("");
     setAnalysis(null);
     setSources([]);
+    setCopyState("idle");
 
     try {
       const res = await fetch("/api/copilot", {
@@ -104,6 +108,18 @@ export function CopilotChat() {
     setError("");
     setSources([]);
     setHistory([]);
+    setCopyState("idle");
+  }
+
+  async function handleCopyReply() {
+    if (!analysis?.customer_reply) return;
+
+    try {
+      await navigator.clipboard.writeText(analysis.customer_reply);
+      setCopyState("success");
+    } catch {
+      setCopyState("error");
+    }
   }
 
   return (
@@ -182,8 +198,22 @@ export function CopilotChat() {
 
               <section className="analysis-section">
                 <h4 className="card-title">Forslag til svar til kunde</h4>
-                <div className="response response-compact">
-                  {analysis.customer_reply}
+                <div className="response-card">
+                  <button
+                    className="copy-button"
+                    type="button"
+                    onClick={handleCopyReply}
+                    aria-label="Kopier forslag til svar"
+                  >
+                    {copyState === "success"
+                      ? "Kopiert"
+                      : copyState === "error"
+                        ? "Kunne ikke kopiere"
+                        : "Kopier"}
+                  </button>
+                  <div className="response response-compact">
+                    {analysis.customer_reply}
+                  </div>
                 </div>
               </section>
 
