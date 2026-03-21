@@ -15,11 +15,15 @@ type RequestBody = {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as RequestBody;
+    const registrationNumberInput =
+      typeof body.registrationNumber === "string" ? body.registrationNumber : "";
+    const textInput = typeof body.text === "string" ? body.text : "";
     const registrationNumber =
-      typeof body.registrationNumber === "string" && body.registrationNumber.trim()
-        ? normalizeRegistrationNumber(body.registrationNumber)
-        : typeof body.text === "string"
-          ? extractRegistrationNumber(body.text)
+      registrationNumberInput.trim()
+        ? extractRegistrationNumber(registrationNumberInput) ||
+          normalizeRegistrationNumber(registrationNumberInput)
+        : textInput
+          ? extractRegistrationNumber(textInput)
           : null;
 
     if (!registrationNumber) {
