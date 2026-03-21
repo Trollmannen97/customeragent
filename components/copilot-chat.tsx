@@ -1,269 +1,250 @@
 "use client";
 
-import { useState } from "react";
+import { useSyncExternalStore, useState } from "react";
+import { ChatKit, useChatKit } from "@openai/chatkit-react";
 
-type ConversationTurn = {
-  role: "user" | "assistant";
-  text: string;
-};
+const STORAGE_KEY = "ev-copilot-chatkit-user";
 
-type CopilotAnalysis = {
-  case_type: string;
-  assessment: string;
-  checks: string[];
-  customer_reply: string;
-  escalation_target: "kundeservice" | "verksted" | "teknisk support" | "annet";
-  escalation_reason: string;
-  follow_up_questions: string[];
-  confidence: "high" | "medium" | "low";
-  needs_web_search: boolean;
-  source_summary: string;
-};
-
-type CopilotResponse = {
-  analysis?: CopilotAnalysis;
-  request_id?: string;
-  error?: string;
-  sources?: Array<{
-    title: string;
-    url: string;
-    sourceType: "web";
-  }>;
-};
-
-function confidenceLabel(confidence: CopilotAnalysis["confidence"]) {
-  switch (confidence) {
-    case "high":
-      return "Hoy trygghet";
-    case "medium":
-      return "Middels trygghet";
-    case "low":
-      return "Lav trygghet";
-    default:
-      return confidence;
+function getStoredUserId() {
+  if (typeof window === "undefined") {
+    return "";
   }
+
+  const existingUserId = window.localStorage.getItem(STORAGE_KEY);
+  if (existingUserId) {
+    return existingUserId;
+  }
+
+  const nextUserId = `web-${crypto.randomUUID()}`;
+  window.localStorage.setItem(STORAGE_KEY, nextUserId);
+  return nextUserId;
+}
+
+function subscribe() {
+  return () => {};
 }
 
 export function CopilotChat() {
-  const [message, setMessage] = useState("");
-  const [analysis, setAnalysis] = useState<CopilotAnalysis | null>(null);
-  const [sources, setSources] = useState<CopilotResponse["sources"]>([]);
-  const [loading, setLoading] = useState(false);
+  const userId = useSyncExternalStore(subscribe, getStoredUserId, () => "");
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<ConversationTurn[]>([]);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [latestReply, setLatestReply] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "success" | "error">(
     "idle",
   );
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    const trimmedMessage = message.trim();
-    if (!trimmedMessage) return;
-
-    setLoading(true);
-    setError("");
-    setAnalysis(null);
-    setSources([]);
-    setCopyState("idle");
-
-    try {
-      const res = await fetch("/api/copilot", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message: trimmedMessage, history }),
-      });
-
-      const data = (await res.json()) as CopilotResponse;
-
-      if (!res.ok) {
-        throw new Error(data.error || "Noe gikk galt.");
-      }
-
-      if (!data.analysis) {
-        throw new Error("Ingen strukturert respons fra modellen.");
-      }
-
-      const nextAnalysis = data.analysis;
-
-      setAnalysis(nextAnalysis);
-      setSources(data.sources || []);
-      setHistory((current) => [
-        ...current,
-        { role: "user", text: trimmedMessage },
-        { role: "assistant", text: nextAnalysis.customer_reply },
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Ukjent feil.");
-    } finally {
-      setLoading(false);
+  async function refreshLatestReply(nextThreadId: string | null) {
+    if (!nextThreadId) {
+      setLatestReply("");
+      setCopyState("idle");
+      return;
     }
-  }
 
-  function handleClear() {
-    setMessage("");
-    setAnalysis(null);
-    setError("");
-    setSources([]);
-    setHistory([]);
+    const res = await fetch("/api/chatkit/latest-reply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        threadId: nextThreadId,
+      }),
+    });
+
+    const data = (await res.json()) as {
+      reply?: string;
+      full_text?: string;
+      error?: string;
+    };
+
+    if (!res.ok) {
+      throw new Error(data.error || "Kunne ikke hente siste svar.");
+    }
+
+    setLatestReply((data.reply || "").trim());
     setCopyState("idle");
   }
 
-  async function handleCopyReply() {
-    if (!analysis?.customer_reply) return;
+  async function handleCopyLatestReply() {
+    if (!latestReply) {
+      return;
+    }
 
     try {
-      await navigator.clipboard.writeText(analysis.customer_reply);
+      await navigator.clipboard.writeText(latestReply);
       setCopyState("success");
     } catch {
       setCopyState("error");
     }
   }
 
-  return (
-    <div className="copilot-layout">
-      <section className="surface surface-input">
-        <div className="surface-heading">
-          <div>
-            <p className="eyebrow">Copilot V2</p>
-            <h2 className="section-title">Analyser kundehenvendelse</h2>
-          </div>
-          <p className="section-copy"></p>
+  const { control } = useChatKit({
+    api: {
+      async getClientSecret() {
+        const res = await fetch("/api/chatkit/session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            user: getStoredUserId(),
+          }),
+        });
+
+        const data = (await res.json()) as {
+          client_secret?: string;
+          error?: string;
+        };
+
+        if (!res.ok || !data.client_secret) {
+          throw new Error(data.error || "Kunne ikke starte chatsession.");
+        }
+
+        return data.client_secret;
+      },
+    },
+    async onClientTool(toolCall) {
+      if (
+        toolCall.name !== "lookup_vehicle_by_registration" &&
+        toolCall.name !== "lookup_vehicle_by_regnr"
+      ) {
+        throw new Error(`Ukjent client tool: ${toolCall.name}`);
+      }
+
+      const candidate =
+        typeof toolCall.params.registration_number === "string"
+          ? toolCall.params.registration_number
+          : typeof toolCall.params.registrationNumber === "string"
+            ? toolCall.params.registrationNumber
+            : typeof toolCall.params.regnr === "string"
+              ? toolCall.params.regnr
+              : typeof toolCall.params.text === "string"
+                ? toolCall.params.text
+                : "";
+
+      const res = await fetch("/api/vehicle-info", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          registrationNumber: candidate,
+          text: candidate,
+        }),
+      });
+
+      const data = (await res.json()) as Record<string, unknown>;
+
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string"
+            ? data.error
+            : "Kunne ikke hente kjoretoydata fra Vegvesen.",
+        );
+      }
+
+      return data;
+    },
+    locale: "nb",
+    theme: "light",
+    frameTitle: "EV Customer Support Copilot",
+    header: {
+      title: {
+        enabled: true,
+        text: "EV Customer Support Copilot",
+      },
+    },
+    composer: {
+      placeholder:
+        "Lim inn kundehenvendelsen her, eller still et internt spørsmål.",
+    },
+    history: {
+      enabled: true,
+    },
+    startScreen: {
+      greeting: "Klar for ny henvendelse.",
+      prompts: [
+        {
+          label: "Ladeproblem",
+          prompt:
+            "Kunden sier at bilen ikke lader hjemme. Hjelp meg med neste steg.",
+        },
+        {
+          label: "App-problem",
+          prompt:
+            "Kunden kommer ikke inn i appen og er frustrert. Hvordan bor vi svare?",
+        },
+        {
+          label: "Verksted",
+          prompt: "Kunden melder om varsellampe og vibrasjon under kjoring.",
+        },
+      ],
+    },
+    onError(event) {
+      setError(event.error.message || "Noe gikk galt i ChatKit.");
+    },
+    onReady() {
+      setError("");
+    },
+    onThreadChange(event) {
+      setThreadId(event.threadId);
+      void refreshLatestReply(event.threadId);
+    },
+    onResponseEnd() {
+      if (!threadId) {
+        return;
+      }
+
+      void refreshLatestReply(threadId);
+    },
+  });
+
+  if (!userId) {
+    return (
+      <section className="surface surface-chatkit">
+        <div className="empty-state">
+          <p className="empty-title">Starter copilot</p>
+          <p className="empty-copy">
+            Oppretter sikker sesjon mot workflowen din.
+          </p>
         </div>
-
-        <form onSubmit={handleSubmit}>
-          <textarea
-            className="textarea"
-            placeholder="Lim inn kundehenvendelsen her, eller skriv et internt spørsmål du vil ha hjelp til."
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-          />
-
-          <div className="actions">
-            <button
-              className="button"
-              type="submit"
-              disabled={loading || !message.trim()}
-            >
-              {loading ? "Analyserer ..." : "Analyser sak"}
-            </button>
-            <button
-              className="button secondary"
-              type="button"
-              onClick={handleClear}
-              disabled={loading}
-            >
-              Ny samtale
-            </button>
-          </div>
-        </form>
-
-        {error ? <p className="error small">{error}</p> : null}
       </section>
+    );
+  }
 
-      <section className="surface surface-response">
-        {analysis ? (
-          <>
-            <div className="analysis-header">
-              <div>
-                <p className="eyebrow">Sakstype</p>
-                <h3 className="analysis-title">{analysis.case_type}</h3>
-              </div>
-              <div className={`confidence confidence-${analysis.confidence}`}>
-                {confidenceLabel(analysis.confidence)}
-              </div>
-            </div>
+  return (
+    <section className="surface surface-chatkit">
+      <div className="surface-heading">
+        <div>
+          <p className="eyebrow">Workflow Live</p>
+          <h2 className="section-title">Kundecopilot</h2>
+        </div>
+        <p className="section-copy">
+          Skriv inn en kundehenvendelse og bruk copilot til a formulere et
+          svarutkast raskt.
+        </p>
+      </div>
 
-            <div className="analysis-flow">
-              <section className="analysis-section">
-                <h4 className="card-title">Kort vurdering</h4>
-                <p className="card-copy">{analysis.assessment}</p>
-              </section>
-
-              <section className="analysis-section">
-                <h4 className="card-title">Kunnskapsgrunnlag</h4>
-                <p className="card-copy">{analysis.source_summary}</p>
-              </section>
-
-              <section className="analysis-section">
-                <h4 className="card-title">Hva bør sjekkes først</h4>
-                <ul className="detail-list">
-                  {analysis.checks.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </section>
-
-              <section className="analysis-section">
-                <h4 className="card-title">Forslag til svar til kunde</h4>
-                <div className="response-card">
-                  <button
-                    className="copy-button"
-                    type="button"
-                    onClick={handleCopyReply}
-                    aria-label="Kopier forslag til svar"
-                  >
-                    {copyState === "success"
-                      ? "Kopiert"
-                      : copyState === "error"
-                        ? "Kunne ikke kopiere"
-                        : "Kopier"}
-                  </button>
-                  <div className="response response-compact">
-                    {analysis.customer_reply}
-                  </div>
-                </div>
-              </section>
-
-              <section className="analysis-section">
-                <h4 className="card-title">Eskalering</h4>
-                <p className="card-copy escalation-line">
-                  <strong>{analysis.escalation_target}</strong>
-                  {" - "}
-                  {analysis.escalation_reason}
-                </p>
-              </section>
-
-              <section className="analysis-section">
-                <h4 className="card-title">Hva mangler eventuelt</h4>
-                {analysis.follow_up_questions.length > 0 ? (
-                  <ul className="detail-list">
-                    {analysis.follow_up_questions.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="card-copy">
-                    Ingen tydelige avklaringssporsmal akkurat na.
-                  </p>
-                )}
-              </section>
-
-              {sources && sources.length > 0 ? (
-                <div className="sources">
-                  <p className="sources-title">Kilder brukt fra websok</p>
-                  <ul className="sources-list">
-                    {sources.map((source) => (
-                      <li key={source.url}>
-                        <a href={source.url} target="_blank" rel="noreferrer">
-                          {source.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </>
-        ) : (
-          <div className="empty-state">
-            <p className="empty-title">Svaret vises her</p>
-            <p className="empty-copy"></p>
-          </div>
-        )}
-      </section>
-    </div>
+      {error ? <p className="error small">{error}</p> : null}
+      <div className="chatkit-toolbar">
+        <p className="toolbar-copy">
+          {latestReply
+            ? "Siste forslag til svar er klart for kopiering."
+            : "Kopierknappen blir aktiv nar copilot har laget et forslag til svar."}
+        </p>
+        <button
+          className="copy-button"
+          type="button"
+          onClick={handleCopyLatestReply}
+          disabled={!latestReply}
+        >
+          {copyState === "success"
+            ? "Kopiert"
+            : copyState === "error"
+              ? "Feilet"
+              : "Kopier forslag"}
+        </button>
+      </div>
+      <ChatKit control={control} className="chatkit-widget" />
+    </section>
   );
 }

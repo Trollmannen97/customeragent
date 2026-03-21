@@ -39,7 +39,7 @@ input {
 
 .page-shell {
   min-height: 100vh;
-  padding: 56px 20px 72px;
+  padding: 28px 20px 40px;
 }
 
 .container {
@@ -49,7 +49,7 @@ input {
 }
 
 .container-narrow {
-  max-width: 900px;
+  max-width: 980px;
 }
 
 .hero {
@@ -89,6 +89,10 @@ input {
   gap: 20px;
 }
 
+.surface-chatkit {
+  min-height: 640px;
+}
+
 .surface {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -111,7 +115,19 @@ input {
 .surface-heading {
   display: grid;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
+}
+
+.chatkit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(172, 193, 219, 0.45);
 }
 
 .eyebrow {
@@ -231,6 +247,19 @@ input {
   outline-offset: 2px;
 }
 
+.copy-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+}
+
+.toolbar-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 0.94rem;
+}
+
 .analysis-header {
   display: flex;
   justify-content: space-between;
@@ -340,6 +369,13 @@ input {
   color: var(--danger);
 }
 
+.chatkit-widget {
+  display: block;
+  width: 100%;
+  min-height: 520px;
+  border: 0;
+}
+
 .status {
   margin: 10px 6px 0;
   color: var(--muted);
@@ -347,7 +383,7 @@ input {
 
 @media (max-width: 640px) {
   .page-shell {
-    padding: 36px 14px 48px;
+    padding: 20px 14px 28px;
   }
 
   .surface {
@@ -359,12 +395,25 @@ input {
     min-height: 280px;
   }
 
+  .surface-chatkit {
+    min-height: 72vh;
+  }
+
   .textarea {
     min-height: 220px;
   }
 
+  .chatkit-widget {
+    min-height: 58vh;
+  }
+
   .actions {
     flex-wrap: wrap;
+  }
+
+  .chatkit-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .analysis-header {
