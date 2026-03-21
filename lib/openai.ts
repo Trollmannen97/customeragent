@@ -12,4 +12,6 @@ export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+export const OPENAI_DOMAIN_PUBLIC_KEY =
+  "domain_pk_69bef93602d08194af3304c662ab66ce063ef95f000dde02";
 export const OPENAI_WORKFLOW_ID = process.env.OPENAI_WORKFLOW_ID;
