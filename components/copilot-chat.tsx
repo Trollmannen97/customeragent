@@ -229,7 +229,7 @@ export function CopilotChat() {
         <p className="toolbar-copy">
           {latestReply
             ? "Siste forslag til svar er klart for kopiering."
-            : "Kopierknappen blir aktiv nar copilot har laget et forslag til svar."}
+            : "Kopierknappen blir aktiv når copilot har laget et forslag til svar."}
         </p>
         <button
           className="copy-button"
