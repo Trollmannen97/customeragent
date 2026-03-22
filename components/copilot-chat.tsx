@@ -216,11 +216,11 @@ export function CopilotChat() {
         {
           label: "App-problem",
           prompt:
-            "Kunden kommer ikke inn i appen og er frustrert. Hvordan bor vi svare?",
+            "Kunden kommer ikke inn i appen og er frustrert. Hvordan bør vi svare?",
         },
         {
           label: "Verksted",
-          prompt: "Kunden melder om varsellampe og vibrasjon under kjoring.",
+          prompt: "Kunden melder om varsellampe og vibrasjon under kjøring.",
         },
       ],
     },
