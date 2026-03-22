@@ -177,7 +177,17 @@ export function CopilotChat() {
         );
       }
 
-      return data;
+      return {
+        registrationNumber:
+          typeof data.registrationNumber === "string"
+            ? data.registrationNumber
+            : candidate,
+        summary: typeof data.summary === "string" ? data.summary : "",
+        technicalData:
+          typeof data.technicalData === "object" && data.technicalData !== null
+            ? data.technicalData
+            : {},
+      };
     },
     locale: "nb",
     theme: "light",
