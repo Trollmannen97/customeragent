@@ -1,7 +1,7 @@
 const DEFAULT_VEGVESEN_API_URL =
   "https://akfell-datautlevering.atlas.vegvesen.no/enkeltoppslag/kjoretoydata";
 
-const REGISTRATION_NUMBER_PATTERN = /\b([A-Z]{1,2}\d{3,5}|EL\d{5}|EK\d{5})\b/i
+const REGISTRATION_NUMBER_PATTERN = /\b([A-Z]{1,2}\d{3,5}|EL\d{5}|EK\d{5})\b/i;
 
 export type VehicleLookupResult = {
   registrationNumber: string;
@@ -23,12 +23,13 @@ export type VehicleLookupResult = {
 };
 
 export function extractRegistrationNumber(text: string) {
-  const match = text.toUpperCase().match(REGISTRATION_NUMBER_PATTERN);
+  const compactText = normalizeRegistrationNumber(text);
+  const match = compactText.match(REGISTRATION_NUMBER_PATTERN);
   return match?.[1] || null;
 }
 
 export function normalizeRegistrationNumber(value: string) {
-  return value.replace(/\s+/g, "").toUpperCase();
+  return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
 function readNestedString(value: unknown, paths: string[][]) {

@@ -5,6 +5,43 @@ import { ChatKit, useChatKit } from "@openai/chatkit-react";
 
 const STORAGE_KEY = "ev-copilot-chatkit-user";
 
+function collectStringValues(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap(collectStringValues);
+  }
+
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap(collectStringValues);
+  }
+
+  return [];
+}
+
+function resolveRegistrationCandidate(params: Record<string, unknown>) {
+  const directKeys = [
+    "registration_number",
+    "registrationNumber",
+    "regnr",
+    "registration",
+    "license_plate",
+    "licensePlate",
+    "text",
+  ];
+
+  for (const key of directKeys) {
+    const value = params[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return collectStringValues(params).join(" ");
+}
+
 function getStoredUserId() {
   if (typeof window === "undefined") {
     return "";
@@ -110,16 +147,13 @@ export function CopilotChat() {
         throw new Error(`Ukjent client tool: ${toolCall.name}`);
       }
 
-      const candidate =
-        typeof toolCall.params.registration_number === "string"
-          ? toolCall.params.registration_number
-          : typeof toolCall.params.registrationNumber === "string"
-            ? toolCall.params.registrationNumber
-            : typeof toolCall.params.regnr === "string"
-              ? toolCall.params.regnr
-              : typeof toolCall.params.text === "string"
-                ? toolCall.params.text
-                : "";
+      const candidate = resolveRegistrationCandidate(toolCall.params);
+
+      if (!candidate.trim()) {
+        throw new Error(
+          "Client tool manglet registreringsnummer i parametrene som ble sendt fra workflowen.",
+        );
+      }
 
       const res = await fetch("/api/vehicle-info", {
         method: "POST",
@@ -129,6 +163,7 @@ export function CopilotChat() {
         body: JSON.stringify({
           registrationNumber: candidate,
           text: candidate,
+          params: toolCall.params,
         }),
       });
 
