@@ -14,6 +14,7 @@ export type VehicleLookupResult = {
     bodyType?: string;
     color?: string;
     seats?: number;
+    powerKw?: number;
     totalWeightKg?: number;
     batteryCapacityKwh?: number;
     rangeKm?: number;
@@ -32,18 +33,32 @@ export function normalizeRegistrationNumber(value: string) {
   return value.replace(/[^A-Z0-9]/gi, "").toUpperCase();
 }
 
-function readNestedString(value: unknown, paths: string[][]) {
-  for (const path of paths) {
-    let current: unknown = value;
+function readPath(value: unknown, path: Array<string | number>) {
+  let current: unknown = value;
 
-    for (const key of path) {
-      if (typeof current !== "object" || current === null || !(key in current)) {
-        current = undefined;
-        break;
+  for (const key of path) {
+    if (typeof key === "number") {
+      if (!Array.isArray(current) || key >= current.length) {
+        return undefined;
       }
 
-      current = (current as Record<string, unknown>)[key];
+      current = current[key];
+      continue;
     }
+
+    if (typeof current !== "object" || current === null || !(key in current)) {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return current;
+}
+
+function readNestedString(value: unknown, paths: Array<Array<string | number>>) {
+  for (const path of paths) {
+    const current = readPath(value, path);
 
     if (typeof current === "string" && current.trim()) {
       return current.trim();
@@ -53,21 +68,19 @@ function readNestedString(value: unknown, paths: string[][]) {
   return undefined;
 }
 
-function readNestedNumber(value: unknown, paths: string[][]) {
+function readNestedNumber(value: unknown, paths: Array<Array<string | number>>) {
   for (const path of paths) {
-    let current: unknown = value;
-
-    for (const key of path) {
-      if (typeof current !== "object" || current === null || !(key in current)) {
-        current = undefined;
-        break;
-      }
-
-      current = (current as Record<string, unknown>)[key];
-    }
+    const current = readPath(value, path);
 
     if (typeof current === "number" && Number.isFinite(current)) {
       return current;
+    }
+
+    if (typeof current === "string") {
+      const parsed = Number(current);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
     }
   }
 
@@ -89,6 +102,7 @@ function buildVehicleSummary(
     technicalData.bodyType,
     technicalData.color,
     technicalData.seats ? `${technicalData.seats} seter` : undefined,
+    technicalData.powerKw ? `${technicalData.powerKw} kW effekt` : undefined,
     technicalData.totalWeightKg ? `${technicalData.totalWeightKg} kg totalvekt` : undefined,
     technicalData.batteryCapacityKwh
       ? `${technicalData.batteryCapacityKwh} kWh batterikapasitet`
@@ -115,52 +129,80 @@ function mapVehicleResponse(
   registrationNumber: string,
   payload: unknown,
 ): VehicleLookupResult {
+  const vehicleData = Array.isArray((payload as { kjoretoydataListe?: unknown })?.kjoretoydataListe)
+    ? (payload as { kjoretoydataListe: unknown[] }).kjoretoydataListe[0]
+    : payload;
+
   const technicalData = {
-    make: readNestedString(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "generelt", "merke", "merke"],
-      ["kjoretoy", "tekniskeData", "generelt", "merke", "merke"],
-      ["kjoretoy", "merke"],
+    make: readNestedString(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "generelt", "merke", 0, "merke"],
     ]),
-    model: readNestedString(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "generelt", "handelsbetegnelse"],
-      ["kjoretoy", "tekniskeData", "generelt", "handelsbetegnelse"],
-      ["kjoretoy", "modell"],
+    model: readNestedString(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "generelt", "handelsbetegnelse", 0],
+      ["godkjenning", "tekniskGodkjenning", "kjoretoyklassifisering", "efTypegodkjenning", "variant"],
     ]),
-    year: readNestedString(payload, [
-      ["kjoretoy", "forstegangsregistrering", "registrertForstegangNorgeDato"],
-      ["kjoretoy", "forstegangsregistrering", "registrertForstegangDato"],
+    year: readNestedString(vehicleData, [
+      ["forstegangsregistrering", "registrertForstegangNorgeDato"],
+      ["godkjenning", "forstegangsGodkjenning", "forstegangRegistrertDato"],
     ])?.slice(0, 4),
-    fuel: readNestedString(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "motorOgDrivverk", "drivstoff", "drivstoffKodeMiljodata", "beskrivelse"],
-      ["kjoretoy", "tekniskeData", "motorOgDrivverk", "drivstoff", "drivstoffKodeMiljodata", "beskrivelse"],
+    fuel: readNestedString(vehicleData, [
+      [
+        "godkjenning",
+        "tekniskGodkjenning",
+        "tekniskeData",
+        "miljodata",
+        "miljoOgdrivstoffGruppe",
+        0,
+        "drivstoffKodeMiljodata",
+        "kodeBeskrivelse",
+      ],
+      [
+        "godkjenning",
+        "tekniskGodkjenning",
+        "tekniskeData",
+        "motorOgDrivverk",
+        "motor",
+        0,
+        "drivstoff",
+        0,
+        "drivstoffKode",
+        "kodeBeskrivelse",
+      ],
     ]),
-    bodyType: readNestedString(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "karosseriOgLasteplan", "rFKarosseri", "beskrivelse"],
-      ["kjoretoy", "tekniskeData", "karosseriOgLasteplan", "rFKarosseri", "beskrivelse"],
+    bodyType: readNestedString(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "karosseriOgLasteplan", "karosseritype", "kodeNavn"],
     ]),
-    color: readNestedString(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "karosseriOgLasteplan", "farge", "beskrivelse"],
-      ["kjoretoy", "tekniskeData", "karosseriOgLasteplan", "farge", "beskrivelse"],
+    color: readNestedString(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "karosseriOgLasteplan", "rFarge", 0, "kodeNavn"],
     ]),
-    seats: readNestedNumber(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "persontall", "sitteplasserTotalt"],
-      ["kjoretoy", "tekniskeData", "persontall", "sitteplasserTotalt"],
+    seats: readNestedNumber(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "persontall", "sitteplasserTotalt"],
     ]),
-    totalWeightKg: readNestedNumber(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "vekter", "tekniskTillattTotalvekt"],
-      ["kjoretoy", "tekniskeData", "vekter", "tekniskTillattTotalvekt"],
+    powerKw: readNestedNumber(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "ovrigeTekniskeData", 0, "datafeltVerdi"],
     ]),
-    batteryCapacityKwh: readNestedNumber(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "miljodata", "elektriskRekkevidde", "batterikapasitetKWh"],
-      ["kjoretoy", "tekniskeData", "miljodata", "elektriskRekkevidde", "batterikapasitetKWh"],
+    totalWeightKg: readNestedNumber(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "vekter", "tillattTotalvekt"],
     ]),
-    rangeKm: readNestedNumber(payload, [
-      ["kjoretoy", "godkjenning", "tekniskGodkjenning", "tekniskeData", "miljodata", "elektriskRekkevidde", "rekkeviddeKm"],
-      ["kjoretoy", "tekniskeData", "miljodata", "elektriskRekkevidde", "rekkeviddeKm"],
+    batteryCapacityKwh: readNestedNumber(vehicleData, [
+      ["godkjenning", "tekniskGodkjenning", "tekniskeData", "miljodata", "elektriskRekkevidde", "batterikapasitetKWh"],
     ]),
-    nextInspectionDue: readNestedString(payload, [
+    rangeKm: readNestedNumber(vehicleData, [
+      [
+        "godkjenning",
+        "tekniskGodkjenning",
+        "tekniskeData",
+        "miljodata",
+        "miljoOgdrivstoffGruppe",
+        0,
+        "forbrukOgUtslipp",
+        0,
+        "wltpKjoretoyspesifikk",
+        "rekkeviddeKmBlandetkjoring",
+      ],
+    ]),
+    nextInspectionDue: readNestedString(vehicleData, [
       ["periodiskKjoretoyKontroll", "kontrollfrist"],
-      ["kjoretoy", "periodiskKjoretoyKontroll", "kontrollfrist"],
     ]),
   };
 
